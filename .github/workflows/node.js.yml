@@ -296,6 +296,7 @@ jobs:
 
   owasp_zap_scan:
     runs-on: Agent-1
+    needs: deploy_to_kubernetes
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

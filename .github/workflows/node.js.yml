@@ -279,3 +279,21 @@ jobs:
         with:
           name: zap-report-json
           path: owaspzap/report.json
+
+  slack-notification_update:
+    runs-on: Agent-1
+    needs: zap-testing-staging:
+    steps:
+     - name: Slack Notification
+        if: always()   # ensures this runs on success & failure
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}   # set in repo secrets
+          SLACK_COLOR: ${{ job.status }}  # green on success, red on failure
+          SLACK_TITLE: "Pipeline Result"
+          SLACK_MESSAGE: |
+            *Repository:* ${{ github.repository }}
+            *Branch:* ${{ github.ref_name }}
+            *Workflow:* ${{ github.workflow }}
+            *Status:* ${{ job.status }}
+            *Report:* Download artifacts from GitHub Actions run

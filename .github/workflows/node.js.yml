@@ -282,9 +282,9 @@ jobs:
 
   slack-notification_update:
     runs-on: Agent-1
-    needs: zap-testing-staging:
+    needs: zap-testing-staging
     steps:
-     - name: Slack Notification
+      - name: Slack Notification
         if: always()   # ensures this runs on success & failure
         uses: rtCamp/action-slack-notify@v2
         env:

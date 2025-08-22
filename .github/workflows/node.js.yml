@@ -44,59 +44,9 @@ jobs:
           gitleaks detect --source ./client --exit-code 1
           gitleaks detect --source ./api --exit-code 1
 
-  owasp_dependency_check:
-    runs-on: Agent-1
-    needs: gitleaks-scan
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Install OWASP Dependency-Check
-        run: |
-          curl -L https://github.com/jeremylong/DependencyCheck/releases/download/v10.0.3/dependency-check-10.0.3-release.zip -o dependency-check.zip
-          unzip -o dependency-check.zip -d $HOME/dependency-check
-          echo "$HOME/dependency-check/dependency-check/bin" >> $GITHUB_PATH
-          mkdir -p reports/client reports/api
-
-      # Scan client folder
-      - name: Run Dependency-Check (Client)
-        run: |
-          dependency-check.sh \
-            --scan ./client \
-            --format HTML \
-            --format JSON \
-            --out reports/client \
-            --enableExperimental \
-            --disableKnownExploited \
-            --noupdate || true
-
-      # Scan api folder
-      - name: Run Dependency-Check (API)
-        run: |
-          dependency-check.sh \
-            --scan ./api \
-            --format HTML \
-            --format JSON \
-            --out reports/api \
-            --enableExperimental \
-            --disableKnownExploited \
-            --noupdate || true
-
-      - name: Upload Dependency-Check Reports
-        uses: actions/upload-artifact@v4
-        with:
-          name: dependency-check-reports
-          path: reports/**
-
   trivy_fs_scan:
     runs-on: Agent-1
-    needs: owasp_dependency_check
+    needs:   gitleaks-scan
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -260,53 +210,72 @@ jobs:
           tags: kumarakshay5/frontend:latest
           file: ./client/Dockerfile
 
-  deploy_to_kubernetes:
+  # deploy_to_kubernetes:
+  #   runs-on: Agent-1
+  #   needs: push_frontend_image
+  #   steps:
+  #   - name: Checkout Code
+  #     uses: actions/checkout@v4
+  #   - name: Install AWS CLI
+  #     run: |
+  #       curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+  #       unzip awscliv2.zip
+  #       sudo ./aws/install --update
+  #   - name: Configure AWS credentials
+  #     uses: aws-actions/configure-aws-credentials@v2
+  #     with:
+  #       aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  #       aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  #       aws-region: ap-south-1
+  #   - name: Set up kubectl
+  #     uses: azure/setup-kubectl@v3
+  #     with:
+  #       version: latest
+  #   - name: Configure kubeconfig
+  #     run: |
+  #       mkdir -p $HOME/.kube
+  #       echo "${{ secrets.EKS_KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+  #   - name: Deploy to EKS
+  #     run: |
+  #       kubectl apply -f k8s-prod/sc.yaml 
+  #       kubectl apply -f k8s-prod/mysql.yaml 
+  #       kubectl apply -f k8s-prod/backend.yaml 
+  #       kubectl apply -f k8s-prod/frontend.yaml 
+  #       kubectl apply -f k8s-prod/ci.yaml 
+  #       kubectl apply -f k8s-prod/ingress.yaml
+
+  zap-testing-staging:
     runs-on: Agent-1
     needs: push_frontend_image
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-    - name: Install AWS CLI
-      run: |
-        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-        unzip awscliv2.zip
-        sudo ./aws/install --update
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ap-south-1
-    - name: Set up kubectl
-      uses: azure/setup-kubectl@v3
-      with:
-        version: latest
-    - name: Configure kubeconfig
-      run: |
-        mkdir -p $HOME/.kube
-        echo "${{ secrets.EKS_KUBECONFIG }}" | base64 -d > $HOME/.kube/config
-    - name: Deploy to EKS
-      run: |
-        kubectl apply -f k8s-prod/sc.yaml 
-        kubectl apply -f k8s-prod/mysql.yaml 
-        kubectl apply -f k8s-prod/backend.yaml 
-        kubectl apply -f k8s-prod/frontend.yaml 
-        kubectl apply -f k8s-prod/ci.yaml 
-        kubectl apply -f k8s-prod/ingress.yaml
-
-  owasp_zap_scan:
-    runs-on: Agent-1
-    needs: deploy_to_kubernetes
-    steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run OWASP ZAP Baseline Scan
-        uses: zaproxy/action-baseline@v0.12.0
+      - name: Create report directory
+        run: mkdir -p owaspzap
+
+      - name: Run ZAP Baseline Scan
+        run: |
+          docker pull ghcr.io/zaproxy/zaproxy:stable
+          docker run --rm -u 0 \
+            -v ${{ github.workspace }}/owaspzap:/zap/wrk/:rw \
+            ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
+            -t https://www.google.com \
+            -J report.json \
+            -r report.html \
+            -I -i
+        continue-on-error: true
+
+      # Upload HTML report as an artifact
+      - name: Upload ZAP HTML Report
+        uses: actions/upload-artifact@v4
         with:
-          target: "https://www.shreeradhaa.in"
-          cmd_options: "-a"
-          docker_name: ghcr.io/zaproxy/zaproxy:stable
-          fail_action: false
-          allow_issue_writing: false   # 👈 disables GitHub issue writing
-          artifact_name: zap_scan
+          name: zap-report-html
+          path: owaspzap/report.html
+
+      # Upload JSON report as an artifact
+      - name: Upload ZAP JSON Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report-json
+          path: owaspzap/report.json

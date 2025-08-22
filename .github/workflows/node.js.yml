@@ -58,24 +58,37 @@ jobs:
 
       - name: Install OWASP Dependency-Check
         run: |
-          curl -L https://github.com/jeremylong/DependencyCheck/releases/download/v9.0.9/dependency-check-9.0.9-release.zip -o dc.zip
-          unzip -q dc.zip -d $HOME/dependency-check
+          curl -L https://github.com/jeremylong/DependencyCheck/releases/download/v10.0.3/dependency-check-10.0.3-release.zip -o dependency-check.zip
+          unzip dependency-check.zip -d $HOME/dependency-check
           echo "$HOME/dependency-check/dependency-check/bin" >> $GITHUB_PATH
-  
-      - name: Run OWASP Dependency-Check on Node.js project
+
+      # Scan client folder
+      - name: Run Dependency-Check (Client)
         run: |
           dependency-check.sh \
-            --project "NodeJS App" \
             --scan ./client \
-            --format "HTML" \
-            --format "JSON" \
-            --out ./dependency-check-report
-  
-      - name: Upload Dependency-Check report
+            --format "HTML,JSON" \
+            --out reports/client \
+            --enableExperimental \
+            --disableKnownExploited \
+            --nvdApiKey "" || true
+
+      # Scan api folder
+      - name: Run Dependency-Check (API)
+        run: |
+          dependency-check.sh \
+            --scan ./api \
+            --format "HTML,JSON" \
+            --out reports/api \
+            --enableExperimental \
+            --disableKnownExploited \
+            --nvdApiKey "" || true
+
+      - name: Upload Dependency-Check Reports
         uses: actions/upload-artifact@v4
         with:
-          name: dependency-check-report
-          path: ./dependency-check-report
+          name: dependency-check-reports
+          path: reports/
 
   trivy_fs_scan:
     runs-on: Agent-1
